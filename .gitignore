@@ -6,6 +6,7 @@
 work/
 out/
 outputs/
+demo/
 *.mp4
 *.wav
 *.mp3

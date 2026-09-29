@@ -19,8 +19,10 @@ import numpy as np
 from PIL import Image
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-FFMPEG = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe"
+from _mvcfg import FFMPEG  # noqa: E402
+
 NO_WIN = 0x08000000
 
 

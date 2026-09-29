@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""把《两岸统一》首帧闸门的 kf / kf1x 拼成带镜号的总览图，供人工看片。
+"""把首帧闸门的 kf / kf1x 拼成带镜号的总览图，供人工看片。
 
-用法：python lianan_kf_sheet.py <输出jpg> <kf|kf1> [每行=10] [每张宽=200]
+用法：python kf_sheet.py <输出jpg> <kf|kf1> [每行=10] [每张宽=200]
+环境变量：MV_BANK（分镜库 JSON，决定镜号顺序）、MV_KF_DIR（首帧目录）
 """
 import io
 import os
@@ -11,8 +12,11 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from PIL import Image, ImageDraw, ImageFont
 
-WORK = r"C:\Users\Huangzelong\Documents\Codex\2026-09-09\ni\work"
-KF_DIR = r"E:\MV-temp\lianan\lianan-kv-frames"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import FONT_UI, get  # noqa: E402
+
+KF_DIR = get("MV_KF_DIR")
+BANK = get("MV_BANK")
 
 
 def main():
@@ -20,8 +24,9 @@ def main():
     cols = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     tw = int(sys.argv[4]) if len(sys.argv) > 4 else 200
     th = int(round(tw * 1344 / 768))
-    bank = __import__("json").load(io.open(os.path.join(WORK, "lianan_shot_bank.json"),
-                                          encoding="utf-8"))
+    if not (KF_DIR and BANK):
+        sys.exit("请设 MV_KF_DIR（首帧目录）与 MV_BANK（分镜库 JSON）")
+    bank = __import__("json").load(io.open(BANK, encoding="utf-8"))
     order = [s["key"] for s in bank["shots"]]
     items = []
     for k in order:
@@ -36,7 +41,10 @@ def main():
     band = 30
     sheet = Image.new("RGB", (tw * cols, (th + band) * rows), (12, 14, 18))
     dr = ImageDraw.Draw(sheet)
-    fnt = ImageFont.truetype(r"C:\Windows\Fonts\msyhbd.ttc", max(14, tw // 11))
+    try:
+        fnt = ImageFont.truetype(FONT_UI or "msyhbd.ttc", max(14, tw // 11))
+    except OSError:
+        fnt = ImageFont.load_default()
     for i, (k, p) in enumerate(items):
         x, y = (i % cols) * tw, (i // cols) * (th + band)
         sheet.paste(Image.open(p).convert("RGB").resize((tw, th), Image.LANCZOS), (x, y))

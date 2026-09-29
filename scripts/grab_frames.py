@@ -7,8 +7,9 @@ import subprocess
 import sys
 from PIL import Image, ImageDraw, ImageFont
 
-FFMPEG = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe"
-FFPROBE = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffprobe.exe"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import FFMPEG, FFPROBE, FONT_UI  # noqa: E402
+
 NO_WIN = 0x08000000   # 子进程静默，避免闪控制台窗口
 
 src, out = sys.argv[1], sys.argv[2]
@@ -23,7 +24,10 @@ TW, TH = 320, 568
 rows = (n + cols - 1) // cols
 sheet = Image.new("RGB", (TW * cols, TH * rows), (14, 16, 20))
 dr = ImageDraw.Draw(sheet)
-fnt = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 26)
+try:
+    fnt = ImageFont.truetype(FONT_UI or "arialbd.ttf", 26)
+except OSError:
+    fnt = ImageFont.load_default()
 for i in range(n):
     t = dur * (i + 0.5) / n
     fp = os.path.join(tmp, "f%02d.jpg" % i)

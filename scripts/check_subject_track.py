@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
-"""A3-18「车是否持续往远处开」的像素判据（视觉模型会把方向读反，所以以像素序列为准）。
+"""主体"持续变小/变远"的像素判据（视觉模型会把方向读反，所以以像素序列为准）。
 
-做法：按等间隔抽帧 → 在画面中下部找**绿色车体**的最大连通域 → 输出面积与中心纵坐标序列。
-判据：面积序列必须**整体单调不增**（允许 ±15% 抖动、允许后段因为车太小而被阈值吃掉）。
-用法：python check_a318_dir.py <clip.mp4> [--n 8] [--hi 3.3]
+做法：按等间隔抽帧 → 在画面中下部找**目标色主体**的最大连通域 → 输出面积与中心纵坐标序列。
+判据：面积序列必须**整体单调不增**（允许抖动、允许后段因为主体太小而被阈值吃掉）。
+
+⚠️ 掩膜是按"深色车体在浅色路面上"调的（`G > R+6 且 G > B+6`）。换主体/换配色时
+必须重调 `car_area()` 里的颜色条件与画面范围，**并且拿一条已知不合格的素材回测**——
+否则会像 2026-09-29 那次一样，把"车后那片偏黄的扬尘"当成车体，误报回程。
+更稳的做法是两个原理不同的量交叉验证（见 skill 的 §5 与 references/qa-checklist.md）。
+
+用法：python check_subject_track.py <clip.mp4> [--n 8] [--hi 3.3]
 """
 import os
 import subprocess
@@ -13,9 +19,11 @@ import numpy as np
 from PIL import Image
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-FFMPEG = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe"
-TMP = r"E:\MV-temp\huoluomuzi-v3\check\_frames_tmp"
+from _mvcfg import FFMPEG, MV_TMP  # noqa: E402
+
+TMP = os.path.join(MV_TMP, "subject_track")
 
 
 def car_area(png):

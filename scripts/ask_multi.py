@@ -17,9 +17,11 @@ from PIL import Image
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-WORK = r"C:\Users\Huangzelong\Documents\Codex\2026-09-09\ni\work"
-KEY = re.search(r'KEY\s*=\s*"([^"]+)"',
-                io.open(os.path.join(WORK, "dense_scan_v3.py"), encoding="utf-8").read()).group(1)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import BASE_URL, api_key, get  # noqa: E402
+
+KEY = api_key()
+MODEL = get("MV_VISION_MODEL", "agnes-3.0-flash")
 
 
 def data_url(path):
@@ -37,13 +39,13 @@ def main():
                 "text": question + "\n下面按顺序给出 %d 张图，依次记为 图1..图%d。" % (len(imgs), len(imgs))}]
     for p in imgs:
         content.append({"type": "image_url", "image_url": {"url": data_url(p)}})
-    body = {"model": "agnes-3.0-flash", "max_tokens": 800,
+    body = {"model": MODEL, "max_tokens": 800,
             "messages": [{"role": "user", "content": content}]}
     ans = "(FAILED)"
     for a in range(5):
         try:
             rq = urllib.request.Request(
-                "https://apihub.agnes-ai.cn/v1/chat/completions",
+                BASE_URL + "/v1/chat/completions",
                 data=json.dumps(body).encode(),
                 headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json"})
             d = json.loads(urllib.request.urlopen(rq, timeout=180).read().decode())

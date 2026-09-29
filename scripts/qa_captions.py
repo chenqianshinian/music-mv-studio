@@ -4,7 +4,10 @@
 原理：取字幕带 y=1490..1670，统计"亮字像素"（min(R,G,B) > 180）占比。
 判据：每个 cue 中点应出现明显峰值；前奏/间奏/尾奏等无 cue 段应接近 0。
 
-用法：qa_captions.py <成片> <srt> [字幕带中心y=1580]
+用法：qa_captions.py <成片> <srt> [字幕带中心y=1580] [亮字阈值=180]
+
+阈值口径（踩过的坑）：暖木色/暖墨色字幕的最暗通道只有 ~158，用 180 会**假报"没有字幕"**。
+出现 0.00% 先把阈值降到 140 复测，再下"确实漏字"的结论。
 """
 import io
 import os
@@ -14,7 +17,9 @@ import sys
 import numpy as np
 from PIL import Image
 
-FFMPEG = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe"
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # 提示里带中文歌词，避免控制台编码把字弄乱
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import FFMPEG, MV_TMP  # noqa: E402
 
 
 def parse_srt(path):
@@ -35,7 +40,9 @@ def parse_srt(path):
 THR = 180  # 2026-09-24：暖木色/暖墨色字幕最暗通道 ~158，180 会假报「没有字幕」，可用第 4 个参数下调
 
 
-def band_ratio(video, t, cy, half=90, tmp=r"E:\MV-temp\zuindongni\work\_qa.jpg"):
+def band_ratio(video, t, cy, half=90, tmp=None):
+    tmp = tmp or os.path.join(MV_TMP, "_qa_caption.jpg")
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
     subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", "%.3f" % t, "-i", video,
                     "-frames:v", "1", "-q:v", "2", tmp], check=False,
                    creationflags=0x08000000)

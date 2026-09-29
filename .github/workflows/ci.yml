@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hygiene:
+    name: 发布门禁（密钥 / 个人路径 / 语法）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 扫明文密钥与个人绝对路径
+        run: python tools/hygiene_scan.py
+      - name: Python 语法检查
+        run: python -m compileall -q scripts tools examples
+
+  markdown:
+    name: Markdown 检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"

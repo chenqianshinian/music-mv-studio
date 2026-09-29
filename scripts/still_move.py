@@ -15,10 +15,12 @@ import subprocess
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PIL import Image
 
-FFMPEG = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe"
+from _mvcfg import FFMPEG  # noqa: E402
+
 NO_WIN = 0x08000000
 
 # 每种运动：(缩放起点, 缩放终点, x 漂移比例, y 漂移比例)  —— 比例相对画面尺寸，正负决定方向

@@ -1,7 +1,26 @@
 # -*- coding: utf-8 -*-
-"""《人生没有白走的路》沙画版 103 镜生成器（复用善意流水线）。
-锁装机制：定妆照锚定（第0帧）+ 尾帧垫图链（链式镜首帧=上一镜尾帧）+ 服装逐字复述。
-并行候选 + 断点续跑 + error=null 安全轮询 + ffprobe 校验。
+"""按分镜库批量生成「首帧 → 第二关键帧（i2i 派生）→ i2v 视频候选」的生成器。
+
+三个关键机制（都是踩过坑换来的，别改掉）：
+
+1. **先出首帧过闸门，再进视频**：`--kf-only` 只出关键帧；首帧没过人工/视觉闸门前
+   不要开跑视频（方向、人数、景别都在这一步定型，文字纠不回来）。
+2. **第二关键帧从首帧 i2i 派生**，不要两张独立生成——独立生成会让模型在两张之间插值，
+   出现双头/鬼影。派生提示词要单独写"推进到哪里"（`kf1_prompt` 字段），
+   并且要与首帧**同人数、同结构**。
+3. **断点续跑**：每个镜的进度写进 state JSON，崩溃/断网后重跑自动跳过已完成的。
+   多路并行用 `--t0-min/--t0-max/--state-tag`，每路一个独立 state 文件。
+
+⚠️ 出图读的是 `shot["keyframes"][i]`，**不是** `shot["keyframe_prompt"]`——
+改提示词要改模型真正读到的那一份（改完回读断言）。
+
+环境变量：AGNES_API_KEY（必填）、AGNES_BASE_URL、
+  MV_KF_MODEL（首帧图像模型，默认 agnes-image-2.1-flash）、
+  MV_I2I_MODEL（派生帧模型，默认同上）、
+  MV_I2V_MODEL（视频模型，默认 agnes-video-v2.0）、
+  ZDN_CAND（覆盖每镜候选数上限）、FFMPEG_BIN
+
+用法：python gen_zuindongni.py --bank <分镜库.json> --outdir <中间产物目录> [--kf-only] [--only A1-3]
 """
 import argparse
 import json
@@ -17,10 +36,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
-KEY = os.environ.get("AGNES_API_KEY") or ""   # 发布版：密钥只走环境变量，禁止写进仓库
-BASE = "https://apihub.agnes-ai.cn"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import BASE_URL, FFMPEG, MV_WORK, get  # noqa: E402
+
+KEY = get("AGNES_API_KEY", "")     # 密钥只走环境变量/.env，禁止写进仓库
+BASE = BASE_URL
 POLL_SEC = 15
-FFMPEG_DIR = r"D:\om-setup\ffmpeg\ffmpeg-8.1.2-essentials_build\bin"
+FFMPEG_DIR = os.path.dirname(FFMPEG)
+KF_MODEL = get("MV_KF_MODEL", "agnes-image-2.1-flash")
+I2I_MODEL = get("MV_I2I_MODEL", "agnes-image-2.1-flash")
+I2V_MODEL = get("MV_I2V_MODEL", "agnes-video-v2.0")
 LOCK = threading.Lock()
 # 子进程一律静默：否则 curl/ffprobe/ffmpeg 在被分离的父进程下会各自新开一个控制台窗口（屏幕上闪窗）
 NO_WIN = 0x08000000
@@ -177,7 +202,7 @@ def poll_one(tid, key, idx, clip_dir, nf):
 def gen_image(prompt, label):
     # 竖版 9:16：必须显式传 size，否则默认方形，两侧构图会被裁掉
     # 默认 2.1；某些细节（例如老人脸上的眼泪）2.1 画不出来时，可用环境变量换更贵的模型再试
-    body = {"model": os.environ.get("KF_MODEL", "agnes-image-2.1-flash"),
+    body = {"model": os.environ.get("KF_MODEL") or KF_MODEL,
             "prompt": prompt, "size": "768x1344"}
     r = post_retry("/v1/images/generations", body, KEY, label, attempts=4, wait0=15)
     if not r:
@@ -229,7 +254,7 @@ def derive_kf1(p0_local, shot, out_png):
         body = ("画面里的人一个都不能少、一个都不能多：不要新增人物，也不要让人物离开画面或消失在画外，"
                 "不要改变人物的长相、服装、人数与人物之间的位置关系，不要改变画幅比例。")
     prompt = (head + cam_lock + body + "画面只沿原来的方向前进一点点：%s。%s") % (move, KF1_STYLE)
-    body = {"model": "agnes-image-2.1-flash", "prompt": prompt, "size": "768x1344",
+    body = {"model": I2I_MODEL, "prompt": prompt, "size": "768x1344",
             "extra_body": {"image": [u0]}}
     r = post_retry("/v1/images/generations", body, KEY, "i2i", attempts=4, wait0=15)
     url = (r.get("data") or [{}])[0].get("url") if r else None
@@ -245,7 +270,8 @@ def derive_kf1(p0_local, shot, out_png):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bank", required=True)
-    ap.add_argument("--outdir", default=r"E:\MV-temp\shanyi-anime")
+    ap.add_argument("--outdir", default=os.path.join(MV_WORK, "mv-project"),
+                    help="中间产物目录（关键帧/片段/state/日志都落这里）")
     ap.add_argument("--api-key", default=KEY)
     ap.add_argument("--kf-only", action="store_true",
                     help="只生成关键帧，不进视频阶段（先人工/视觉质检首帧再决定是否开跑）")
@@ -453,7 +479,7 @@ def main():
         raw_frames = max(121, int(seg_need * 24))
         num_frames = min(249, ((raw_frames - 1 + 7) // 8) * 8 + 1)
         neg = negative + (s.get("negative_extra") or "")
-        body = {"model": "agnes-video-v2.0", "prompt": s["i2v_prompt"],
+        body = {"model": I2V_MODEL, "prompt": s["i2v_prompt"],
                 "width": 768, "height": 1344, "num_frames": num_frames,
                 "frame_rate": 24, "negative_prompt": neg,
                 "extra_body": {"mode": "keyframes", "image": urls[:3]}}
