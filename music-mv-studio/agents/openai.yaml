@@ -1,0 +1,4 @@
+interface:
+  display_name: "音乐MV制作工作流"
+  short_description: "AI音乐MV全流程：歌词叙事设计、多关键帧垫图、图生视频、行书字幕、QA验收"
+  default_prompt: "用 music-mv-studio 工作流为一首歌制作 MV"

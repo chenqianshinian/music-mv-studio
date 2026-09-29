@@ -1,0 +1,20 @@
+# 密钥：绝不入库
+.env
+*.key
+
+# 运行产物（几 GB 的帧缓存、成片、音频）——仓库里只留方法，不留素材
+work/
+out/
+outputs/
+*.mp4
+*.wav
+*.mp3
+*.m4a
+*.srt
+
+# 临时与缓存
+__pycache__/
+*.pyc
+*.tmp
+.DS_Store
+Thumbs.db
