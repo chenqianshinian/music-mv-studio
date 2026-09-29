@@ -1,11 +1,15 @@
 # Music MV Studio
 
 ![license](https://img.shields.io/badge/license-MIT%20%2B%20CC--BY--4.0-blue)
+![type](https://img.shields.io/badge/type-Agent%20Skill-6f42c1)
 
-**一套把「一首歌 + 一份歌词」做成竖版音乐 MV 的可复用工作流**：导演方法 + 一条跑过七首长片
-（每首 100 镜量级）的生成管线 + 41 条真实踩过的坑。
+**一个「音乐视频（MV）制作」的 Agent Skill**：把「一首歌 + 一份歌词」做成竖版音乐 MV 的可复用工作流——
+导演方法 + 一条跑过七首长片（每首 100 镜量级）的生成管线 + 41 条真实踩过的坑。
 
-> 这个仓库最值钱的部分不是脚本，是 [SKILL.md](SKILL.md) 的 **§5 血泪清单**。
+> 入口是 **[SKILL.md](SKILL.md)**：支持 Agent Skills 的工具（Codex 等）把它放进 skills 目录即可加载；
+> 不装进 Agent 也能照做——它就是一份可执行的制作纪律 + 一组能独立运行的 Python 脚本。
+>
+> 这个仓库最值钱的部分不是脚本，是 SKILL.md 的 **§5 血泪清单**。
 > 能跑的 AI 流水线很多；把「踩过什么坑、为什么、正确做法是什么」写下来的很少。
 
 ## 它不是黑盒
