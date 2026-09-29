@@ -24,6 +24,8 @@
 - **新增工程四件**：LICENSE（代码 MIT ＋ 文档 CC BY 4.0）、README、CONTRIBUTING、本文件；
   以及 CI（markdown lint ＋ 密钥/路径扫描 ＋ 语法检查）。
 - 模型名参数化（`MV_KF_MODEL` / `MV_I2I_MODEL` / `MV_I2V_MODEL` / `MV_VISION_MODEL`），不再写死在脚本里。
+- **新增 §11「升级模型前先做一次 A/B」**：区分"兼容换代"（换名字即可）与"不兼容换代"
+  （协议变了，报 `invalid mode` / `xxx is a forbidden field`），附 2026-09-29 的实测数据。
 - `agents/openai.yaml` 由 GBK 转存 UTF-8（原先在别人机器上是乱码）。
 
 ## [2.8] - 2026-09-26（内部）
