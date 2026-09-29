@@ -139,6 +139,22 @@ python scripts/gen_zuindongni.py --bank <你的分镜库.json> --outdir <中间�
 - **时间成本**：一次"定点返修"的主要开销是合成而不是生成，所以**同批问题攒起来一次改完**
   （这也是一条纪律，见 SKILL §9）。
 
+## 接口与兼容性
+
+脚本只用标准库 `urllib` 调三类 **OpenAI 风格**的 HTTP 接口，所以**任何兼容这三类接口的网关都能用**，
+换供应商只改 `.env`，代码一行都不用动：
+
+| 用途 | 接口 | 环境变量 |
+|---|---|---|
+| 首帧 / 第二关键帧 | `POST /v1/images/generations` | `MV_KF_MODEL`、`MV_I2I_MODEL` |
+| 图生视频 | `POST /v1/videos` ＋ 轮询任务状态 | `MV_I2V_MODEL` |
+| 视觉复核（数人头、判画风） | `POST /v1/chat/completions`（多模态） | `MV_VISION_MODEL` |
+
+`.env.example` 里的默认地址与模型名，是我做这些 MV 时实际使用的服务商（Agnes AI，`apihub.agnes-ai.cn`）；
+写上去只是为了让仓库**开箱可跑**。本项目与任何模型服务商都**没有隶属、赞助或背书关系**，
+各模型的能力、额度、计费与素材授权请以服务商自己的条款为准。
+（密钥变量名沿用 `AGNES_API_KEY`，纯属历史命名，换成其它供应商照样用。）
+
 ## 常见问题
 
 **Q：一定要用某个模型服务吗？**
