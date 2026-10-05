@@ -5,7 +5,7 @@
 ![CI](https://github.com/chenqianshinian/music-mv-studio/actions/workflows/ci.yml/badge.svg)
 
 **一个「音乐视频（MV）制作」的 Agent Skill**：把「一首歌 + 一份歌词」做成竖版音乐 MV 的可复用工作流——
-导演方法 + 一条跑过多首长片（每首约 100 镜）的生成管线 + 58条真实踩过的坑。
+导演方法 + 一条跑过多首长片（每首约 100 镜）的生成管线 + 58 条真实踩过的坑。
 
 > 入口是 **[SKILL.md](SKILL.md)**：支持 Agent Skills 的工具（Codex 等）把它放进 skills 目录即可加载；
 > 不装进 Agent 也能照做——它就是一份可执行的制作纪律 + 一组能独立运行的 Python 脚本。
@@ -16,7 +16,7 @@
 ## 它不是黑盒
 
 | 是 | 不是 |
-|---|---|
+| --- | --- |
 | 一份可照做的**制作纪律**：什么必须先定、什么必须量、什么必须重出 | 输入歌名就自动出片的按钮 |
 | 一条**可断点续跑**的管线：首帧闸门 → 逐镜生成 → 按帧号缓存的合成 → 像素级质检 → 定点返修 | 一个端到端训练好的模型 |
 | 一套**验收方法**：用像素和数字下结论，而不是"看着还行" | 保证一次成功的魔法 |
@@ -117,7 +117,7 @@ python scripts/gen_zuindongni.py --bank <你的分镜库.json> --outdir <中间�
 
 ```
 .
-├── SKILL.md                 # ★ 方法论与纪律（§5 = 51 条血泪清单）
+├── SKILL.md                 # ★ 方法论与纪律（§5 = 58 条血泪清单）
 ├── README.md
 ├── CHANGELOG.md             # 每一版改了什么、为什么
 ├── CONTRIBUTING.md
@@ -198,7 +198,7 @@ v3.1 的修法：
 换供应商只改 `.env`，代码一行都不用动（垫图上传走 `curl`，见表格最后一行）：
 
 | 用途 | 接口 | 环境变量 |
-|---|---|---|
+| --- | --- | --- |
 | 首帧 / 第二关键帧 | `POST /v1/images/generations` | `MV_KF_MODEL`、`MV_I2I_MODEL` |
 | 图生视频 | `POST /v1/videos` ＋ 轮询任务状态 | `MV_I2V_MODEL` |
 | 视觉复核（数人头、判画风） | `POST /v1/chat/completions`（多模态） | `MV_VISION_MODEL` |
