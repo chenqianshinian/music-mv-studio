@@ -8,25 +8,29 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _mvcfg import FFMPEG, FFPROBE, FONT_UI  # noqa: E402
+from _mvcfg import FFMPEG, FFPROBE, FONT_UI, NO_WIN, resolve_font
 
-NO_WIN = 0x08000000   # 子进程静默，避免闪控制台窗口
 
 src, out = sys.argv[1], sys.argv[2]
 n = int(sys.argv[3]) if len(sys.argv) > 3 else 24
 cols = int(sys.argv[4]) if len(sys.argv) > 4 else 6
-dur = float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration",
-                            "-of", "csv=p=0", src], capture_output=True, text=True,
-                           creationflags=NO_WIN).stdout.strip())
+_probe = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration",
+                         "-of", "csv=p=0", src], capture_output=True, text=True,
+                        creationflags=NO_WIN)
+try:
+    dur = float(_probe.stdout.strip())
+except ValueError:
+    sys.exit("拿不到时长：ffprobe 失败（设 FFPROBE_BIN 或检查视频路径）\n  %s"
+             % ((_probe.stderr or "").strip() or _probe.stdout.strip()))
 tmp = out + "_frames"
 os.makedirs(tmp, exist_ok=True)
 TW, TH = 320, 568
 rows = (n + cols - 1) // cols
 sheet = Image.new("RGB", (TW * cols, TH * rows), (14, 16, 20))
 dr = ImageDraw.Draw(sheet)
-try:
-    fnt = ImageFont.truetype(FONT_UI or "arialbd.ttf", 26)
-except OSError:
+try:  # 时间码用跨平台能画中文/数字的字体（以前写死 arialbd.ttf，非 Windows 上必然回退）
+    fnt = ImageFont.truetype(resolve_font(FONT_UI) or "", 26)
+except (OSError, TypeError):
     fnt = ImageFont.load_default()
 for i in range(n):
     t = dur * (i + 0.5) / n

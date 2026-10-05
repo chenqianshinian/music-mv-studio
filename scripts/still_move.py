@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """确定性 2.5D 运镜：把一张静图渲染成有缓慢机位的短视频（无生成模型、逐帧可复现）。
 
-用途（借鉴 video-shotcraft「运动是代码定义的」）：**无人物空镜**（_char_mode=none）不必走 i2v——
-i2v 在这类镜上的价值只是"云动/水动"，代价却是"派生帧丢人/凭空加人/方向反"整类 bug 与 2–4 分钟/镜。
+用途（**2026-09-25 已修正口径，见 SKILL §10**）：**只用于第二关键帧兜底与单镜返修**。
+曾经用它替无人空镜省成本，被用户看片推翻——原话「很多河流、海鸥、鸟雀、烟雾、雪的镜头都不动……疑似幻灯片了」：
+确定性运镜只给画面加**相机位移**，没有元素自身的物理运动（水不流、鸟不飞、烟不散、雪不落）。
+现行口径：**空镜也走 i2v**，并逐镜写【运动锁】（§5 #19/#27）。
 
 用法：
   python still_move.py <静图> <输出mp4> [秒数=5] [运动=push|pull|pan_left|pan_right|tilt_up|drift] [fps=24]
@@ -19,9 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PIL import Image
 
-from _mvcfg import FFMPEG  # noqa: E402
+from _mvcfg import FFMPEG, NO_WIN
 
-NO_WIN = 0x08000000
 
 # 每种运动：(缩放起点, 缩放终点, x 漂移比例, y 漂移比例)  —— 比例相对画面尺寸，正负决定方向
 MOVES = {

@@ -15,12 +15,22 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {".git", "__pycache__", "node_modules"}
 TEXT_EXT = {".md", ".py", ".json", ".yaml", ".yml", ".txt", ".toml", ".cfg", ".example", ""}
 
+# 占位名不算命中：文档里出现 /Users/<user>/… 这类示例是正常的
+_PLACEHOLDER = r"(?:<[^/>]+>|your[-_]?name|username|user|me|example|xxx|someone|youruser)"
+# 只有当用户目录那一段**不是**占位名时才命中
+_NOT_PLACEHOLDER = r"(?!(?:" + _PLACEHOLDER + r")(?![A-Za-z0-9_.-]))"
 CHECKS = [
     ("明文密钥(sk-…)", re.compile("sk" + "-" + r"[A-Za-z0-9]{12,}")),
     ("明文密钥(Bearer …)", re.compile(r"Bearer\s+[A-Za-z0-9._-]{16,}")),
+    # portability-scan-allow: 这里是在**检测** Windows 路径，不是自己在写死 Windows 路径
     ("机器路径(Windows 用户名)", re.compile(r"C:\\+Users\\+[A-Za-z0-9_.-]+")),
     ("机器路径(个人盘)", re.compile(r"[A-Z]:\\+MV-temp|[A-Z]:\\+CodexMemory|[A-Z]:\\+om-setup")),
     ("个人歌库路径", re.compile(r"[A-Z]:\\+AIGC")),
+    # 2026-10-05：v3.0 只扫 Windows 风格路径，macOS/Linux 上的个人绝对路径会全部漏过
+    # （实测：往 scripts/ 里放一条 /Users/<真实用户名>/… 仍报 0 处命中）。两条补上。
+    ("机器路径(macOS 用户目录)", re.compile(r"/Users/" + _NOT_PLACEHOLDER + r"[A-Za-z0-9_.-]+")),
+    ("机器路径(Linux 用户目录)", re.compile(r"/home/" + _NOT_PLACEHOLDER + r"[A-Za-z0-9_.-]+")),
+    ("机器路径(个人数据盘)", re.compile(r"/(?:Volumes|mnt|media)/[A-Za-z0-9_.-]*(?:MV-temp|AIGC|CodexMemory)")),
 ]
 
 

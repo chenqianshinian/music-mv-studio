@@ -13,7 +13,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _mvcfg import FONT_UI, get  # noqa: E402
+from _mvcfg import FONT_UI, get, resolve_font  # noqa: E402
 
 KF_DIR = get("MV_KF_DIR")
 BANK = get("MV_BANK")
@@ -42,8 +42,8 @@ def main():
     sheet = Image.new("RGB", (tw * cols, (th + band) * rows), (12, 14, 18))
     dr = ImageDraw.Draw(sheet)
     try:
-        fnt = ImageFont.truetype(FONT_UI or "msyhbd.ttc", max(14, tw // 11))
-    except OSError:
+        fnt = ImageFont.truetype(resolve_font(FONT_UI) or "", max(14, tw // 11))
+    except (OSError, TypeError):
         fnt = ImageFont.load_default()
     for i, (k, p) in enumerate(items):
         x, y = (i % cols) * tw, (i // cols) * (th + band)
@@ -53,4 +53,5 @@ def main():
     print("sheet: %s  %s  %d 张  %dx%d" % (out, kind, len(items), sheet.size[0], sheet.size[1]))
 
 
-main()
+if __name__ == "__main__":
+    main()

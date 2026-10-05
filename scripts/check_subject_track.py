@@ -21,7 +21,7 @@ from PIL import Image
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _mvcfg import FFMPEG, MV_TMP  # noqa: E402
+from _mvcfg import FFMPEG, MV_TMP, NO_WIN
 
 TMP = os.path.join(MV_TMP, "subject_track")
 
@@ -77,7 +77,7 @@ def main():
         png = os.path.join(outd, "t%02d.png" % i)
         subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", "%.3f" % t, "-i", clip,
                         "-frames:v", "1", png], check=False,
-                       creationflags=0x08000000)
+                       creationflags=NO_WIN)
         r = car_area(png)
         seq.append((t, r))
     print("== %s（使用窗口 0–%.1fs）" % (tag, hi))

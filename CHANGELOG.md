@@ -4,6 +4,113 @@
 **1.x / 2.x 是内部版本**（用来给自己的制作打分），3.0 起对外开源；
 内部版本条目保留下来，因为"哪一版因为什么被推翻"本身就是经验（详见 SKILL.md §10）。
 
+## [3.1.0] - 2026-10-05
+
+**跨平台修复版。** 3.0 在 Windows 上一切正常，同一份代码在 macOS/Linux 上却有 7 个脚本直接崩。
+根因是作者的提交环境是 Windows、能跑通的只有那一条路径；CI 当时只做"语法 + 静态扫描"，
+这一类问题一个都抓不到。这一版的主题是**让非 Windows 的机器也真能跑完整条管线**，
+顺带修掉几处"出错但不报错"的静默失败。
+
+**跨平台（P0）**
+
+- **平台差异集中到 `scripts/_mvcfg.py` 的 `NO_WIN`**（`0x08000000 if os.name == "nt" else 0`）。
+  `qa_captions` / `grab_frames` / `check_transient` / `check_subject_track` / `still_move` /
+  `gen_zuindongni` / `status` 原先各自把 Windows 专有的 creationflags 直接传给 `subprocess`，
+  在 macOS/Linux 上抛 `ValueError: creationflags is only supported on Windows platforms`——
+  README"5 分钟跑通"里那条 `qa_captions` 自检就崩在这一行，只是没人有机会看到。
+- **生成器去 Windows 专有**：`curl.exe` → `CURL`（新增 `CURL_BIN`，默认 `curl`）、`NUL` → `os.devnull`、
+  `ffprobe.exe` / `ffmpeg.exe` → `FFPROBE` / `FFMPEG`。最后这条不只是可移植性：原先它完全绕过
+  `FFPROBE_BIN`，用户填了也不生效。
+- **图床可配置**：新增 `MV_UPLOAD_URL`（默认仍是 `https://uguu.se/upload`）、`MV_UPLOAD_FIELD`
+  （默认 `files[]`）、`MV_UPLOAD_DISABLE=1`（离线自检时禁止上传）。首次上传会提示"默认是匿名公共图床，
+  含人脸的关键帧会变成公开可访问的 URL"——这件事得在第一次上传**之前**说，而不是等出了片再说。
+- **字体跨平台**：`_mvcfg.resolve_font()` 按平台探测 CJK 字体（macOS 苹方 / 冬青黑 / 华文黑体，
+  Windows 雅黑 / 黑体 / 思源，Linux Noto CJK / 文泉驿），`font_can_cjk()` 真渲染"中/永"两个字、
+  比对位图是否相同来识别"缺字方框"；`compose_mv.py` 找不到时明确警告（字幕会变豆腐块，而
+  `qa_captions` 只数亮像素、会假报有字幕），`grab_frames.py` / `kf_sheet.py` 不再写死
+  `arialbd.ttf` / `msyhbd.ttc`。
+- **`tools/hygiene_scan.py` 补扫 macOS/Linux 个人路径**：原先只扫 `C:\Users\<用户名>` 风格，
+  实测漏掉 `/Users/<用户名>/…`（往 `scripts/` 里放一条这样的路径仍然是 0 命中）。
+
+**静默出错类修复（P1）**
+
+- **`.env` 解析剥行内注释**：`MV_KF_MODEL=xxx  # 首帧` 不再把注释当模型名（v3.0 照抄模板会出现
+  `'agnes-image-2.1-flash      # 首帧图像'` 这种模型名）。`.env.example` 里的注释也一并改成独占一行。
+- **`qa_captions.py` 给出判定与退出码**（0 = 每条已检 cue 都有峰值 / 1 = 低于下限 / 2 = 抽帧失败 /
+  3 = 没有一条 cue 落在成片时长内、判据不成立）；阈值 180 下低于下限时自动降到 140 复测**并以复测值为准**
+  （实测结尾淡出段的字幕在 180 下读成 0.00%、在 140 下是 5.75%，不这样做会把好字幕判成漏字）；
+  抽帧失败不再复用上一轮残留图（复用会得到一个假结论）；cue 超出成片时长（例如 `--until` 只合成了一段）
+  时跳过而不是判失败。
+- **`status.py` 取不到进程列表时返回 None 并显式上报"进程类结论不可信"**：原先异常被 `except`
+  吞掉、永远显示"（无）"，会把"生成器还在跑"误报成"已崩"——对"该不该重跑"的判断来说是最坏的一种错。
+- **`compose_mv.py` 抽帧失败当场报错**（原先 `check=False`，失败后会在后面以 `FileNotFoundError` 崩，
+  离现场很远）；新增片段签名清单 `<WORK>/clips-manifest.json`——签名相同就跳过重复抽帧（原先每次
+  合成都要把所有片段重抽一遍），片段变了则打印受影响的镜与帧号区间，`--strict-cache` 直接拒绝出一版
+  可能过期的成片。
+- **`doctor.py` 新增检查**：平台 / `NO_WIN` 合法性、curl、**真渲染中文**的字体检查（找不到可判阻塞）、
+  模型名里混入注释、上传图床隐私提示。
+- **`examples/make_demo_assets.py` 体积下调**（CRF 22→24、噪声 12→8），新增 `--fast`（每段 4 秒、
+  CRF 28、弱噪声，给 CI 用）与 `--sec`；打印的 `ZDN_TOTAL` 改成从分镜库实际总时长读出（仍是 14.2s）。
+  原因：v3.0 默认参数会产出 4×19MB 片段 + 88MB 成片，对"5 分钟跑通"的示例偏重。
+- **`gen_zuindongni.py`**：分镜库没有 `_meta.ids` 却要用脚本内置的示例角色卡（妈妈 / 哥哥 / …）时
+  打印警告，避免"以为在跑自己的歌、其实在用示例角色卡"。
+- **`still_move.py` 的 docstring 口径修正**：里面还写着"无人物空镜不必走 i2v"，与 SKILL §10 已推翻的
+  结论冲突，改成"只用于第二关键帧兜底与单镜返修"。
+
+**门禁与 CI**
+
+- **新增 `tools/portability_scan.py`**：静态扫"只在 Windows 上能跑"的写法（creationflags `0x08000000`、
+  写死的 `*.exe`、`NUL`、盘符路径、Windows 专有命令行惯用法）；命中行写
+  `# portability-scan-allow: 理由` 可豁免（写在上一行的注释也认）。
+- **新增 `tests/smoke_offline.py`**：零成本端到端冒烟测试（示例素材 → 合成前 7.8s → 字幕 QA → 总览图 →
+  瞬现物检测 → 字体可画中文 → 片段签名清单 / 帧缓存复用 / 片段变更时 `--strict-cache` 拒绝出片），
+  不需要密钥、不调用任何模型。
+- **CI 新增 `smoke` job**：在 ubuntu-latest / macos-latest / windows-latest 三个平台装 ffmpeg
+  （Linux 另装 fonts-noto-cjk）后跑 `doctor.py` 与 `smoke_offline.py`；`hygiene` job 增加
+  `portability_scan.py` 与 tests 的 `compileall`。
+- **SKILL.md §5 新增 #42–#45**：Windows 专有常量不能进公共代码路径 / 发布门禁必须在非 Windows 上
+  真跑一遍管线 / `.env` 模板的行内注释会被当成值 / 字体缺失让字幕变豆腐块而"数亮像素"的 QA 会假报通过；
+  §10 补两行（"帧间差<8 判静态"在 `references/qa-checklist` 里还残留；"确定性运镜替无人空镜"）。
+- **新增 `examples/README.md`**：分镜库字段说明。
+
+**这一版没有改什么**
+
+- 没有改管线设计：七步跑法、断点续跑、首帧闸门、按帧号缓存都与 3.0 一致；
+- 没有改分镜库格式：`examples/song-a-bank.json` 与 `_meta` 字段照旧，老库直接能用；
+- 没有改接口形状：仍是三类 OpenAI 风格接口加一个图床表单上传，换供应商只改 `.env`。
+
+验证：macOS（Python 3.14 / ffmpeg 8.1）上 `python tests/smoke_offline.py` 9/9 通过（约 28 秒），
+`python tools/hygiene_scan.py` 与 `python tools/portability_scan.py` 各 0 命中，
+`python scripts/doctor.py` 结论"就绪"。
+
+## [3.1.1] - 2026-10-05
+
+**字幕时轴与"图层/缓存"验证补强。** 3.1.0 解决的是"非 Windows 上能不能跑"；
+这一版来自第 8 首长片（97 镜）**交片之后**的复盘——补的全是**跑得通、但结果错**的坑：
+脚本一行错都不报，成片却不对（共同点是"把错误当成正常输入处理过去了"）。
+
+- **歌词时轴改用人声分轨**（§5 #46）：v1 用整轨（人声混伴奏）ASR 定时，唱段起音天然偏晚。
+  实测同一句（"通讯录往下…"）**整轨 20.20s、人声分轨 16.58s**（成品轴 ≈17.2s）——差 3s 级，
+  用户听到的是"唱到第三句了字幕才出第一句"，后面每句都顺着错。现行口径：唱段定时只用分轨，
+  再映射到成品轴（本曲 `t_成品 = 1.020425·t_分轨 + 0.2613`，成品比干声长 2.04%）。
+- **字幕行数上限 2 行**（§5 #47）：分句多时会被挤成三行。渲染前把 >2 个分句按字数就近均衡合并成 2 行；
+  行内分段点亮时宽度按全文算，避免后段出现时前段跳位。本片 57 条 cue 里 4 条命中，改完抽全尺寸帧复验。
+- **代码图层必须在片段帧上复验**（§5 #48）：UI 面板按首帧几何画，i2v 把手机挪了位置，
+  面板就飘到手/背景上，手机屏幕本身还是空屏。首帧 100% 吻合、片段里完全不吻合。
+- **`cues: 0` 当硬错误**（§5 #49）：`ZDN_SRT` 指到"交付阶段才拷过去的那份 srt"，合成时文件还不存在，
+  脚本静默按"没有 cue"出片 → 整片无字幕、整片返工。声明了逐句字幕却解析出 0 条必须报错退出。
+- **驱动要显式把 `FFMPEG_BIN` / `FFPROBE_BIN` 交给子进程**（§5 #50）：否则子进程落回 `"ffmpeg"` 走 PATH，
+  合成在抽帧第一步就 `FileNotFoundError`（离真正原因很远）。
+- **`<WORK>/out` 存的是成品帧，不是片段抽帧缓存**（§5 #51）：按帧号复用意味着新字幕/图层进不去。
+  只改片段 → 走片段签名清单增量重画；改字幕/图层/颗粒参数 → 受影响帧区间整体移走再重跑。
+- **`tests/smoke_offline.py` 把子进程的编码约定死**：子脚本的 stdout 编码并不统一——
+  `qa_captions` / `check_transient` 把自己重配成 UTF-8，`compose_mv` 沿用系统区域（中文 Windows 上是 GBK）。
+  父进程按任一固定编码解码，总有一半对不上：按 GBK 解会在读取线程抛 `UnicodeDecodeError` 并**吞掉输出**
+  （中文 Windows 实测复现），按 UTF-8 解则是乱码。修法：给子进程设 `PYTHONIOENCODING=utf-8`，
+  父进程按 UTF-8 解码。修完在中文 Windows 上 9/9 通过、中文输出正常。
+- 血泪清单 45 → 51 条；§10 合并了两条重复行（同一条旧结论分别残留在 `references/qa-checklist.md`
+  与 `still_move.py` 的 docstring 里）。
+
 ## [3.0.0] - 2026-09-29
 
 **开源首版。** 内容与 2.8 一致，主要变化是"能给别人用了"：

@@ -18,7 +18,13 @@
   MV_KF_MODEL（首帧图像模型，默认 agnes-image-2.1-flash）、
   MV_I2I_MODEL（派生帧模型，默认同上）、
   MV_I2V_MODEL（视频模型，默认 agnes-video-v2.0）、
-  ZDN_CAND（覆盖每镜候选数上限）、FFMPEG_BIN
+  ZDN_CAND（覆盖每镜候选数上限）、FFMPEG_BIN / FFPROBE_BIN / CURL_BIN、
+  MV_UPLOAD_URL / MV_UPLOAD_FIELD（垫图图床；默认 https://uguu.se/upload，字段 files[]）、
+  MV_UPLOAD_DISABLE（=1 时禁止上传，离线自检用）
+
+⚠️ **垫图会上传到图床**：默认是一家匿名公共图床，含人脸的关键帧会变成公开可访问的 URL；
+   要换成自建/私有图床请设 `MV_UPLOAD_URL`（需兼容 `curl -F <字段>=@文件 <URL>`）。
+   上传后会再用 HTTP Range 探活（图床偶发 404 会让生成任务拿到坏链接、静默失败，见 references/pipeline.md §4）。
 
 用法：python gen_zuindongni.py --bank <分镜库.json> --outdir <中间产物目录> [--kf-only] [--only A1-3]
 """
@@ -37,18 +43,22 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _mvcfg import BASE_URL, FFMPEG, MV_WORK, get  # noqa: E402
+from _mvcfg import (BASE_URL, CURL, FFMPEG, FFPROBE, MV_WORK, NO_WIN,  # noqa: E402
+                    NULL_DEVICE, get)
 
 KEY = get("AGNES_API_KEY", "")     # 密钥只走环境变量/.env，禁止写进仓库
 BASE = BASE_URL
 POLL_SEC = 15
-FFMPEG_DIR = os.path.dirname(FFMPEG)
 KF_MODEL = get("MV_KF_MODEL", "agnes-image-2.1-flash")
 I2I_MODEL = get("MV_I2I_MODEL", "agnes-image-2.1-flash")
 I2V_MODEL = get("MV_I2V_MODEL", "agnes-video-v2.0")
 LOCK = threading.Lock()
-# 子进程一律静默：否则 curl/ffprobe/ffmpeg 在被分离的父进程下会各自新开一个控制台窗口（屏幕上闪窗）
-NO_WIN = 0x08000000
+# NO_WIN（子进程静默，避免 Windows 上闪控制台窗口）来自 _mvcfg：非 Windows 平台它必须是 0，
+# 否则 subprocess 直接抛 ValueError（v3.1 修的跨平台 bug，见 _mvcfg 文件头与 SKILL §5 #42）。
+UPLOAD_URL = get("MV_UPLOAD_URL", "https://uguu.se/upload")
+UPLOAD_FIELD = get("MV_UPLOAD_FIELD", "files[]")
+UPLOAD_DISABLED = get("MV_UPLOAD_DISABLE") == "1"
+_upload_notice_shown = False
 
 STYLE = ("写实电影摄影：35mm 胶片质感，浅景深，真实自然的皮肤与织物纹理，电影级布光，"
          "细腻的暗部层次与轻微颗粒感，纪实、克制，无文字无水印")
@@ -57,6 +67,9 @@ STYLE = ("写实电影摄影：35mm 胶片质感，浅景深，真实自然的�
 # 库里有 _meta.style_prompt / _meta.kf1_style 时优先用它；没有时行为与从前完全一致。
 KF1_STYLE = "写实电影摄影，真实皮肤与织物质感，浅景深，无文字无水印"
 
+# ⚠️ 下面是**仓库自带的示例角色卡**（作者早期项目的历史默认值，脱敏但仍带具体设定）。
+# 真项目请在分镜库里用 _meta.ids 覆盖，或写 "ids": {} 跳过定妆照阶段；
+# 两者都没有时会在开工时打印警告，避免"以为在跑自己的歌、其实在用示例角色卡"。
 IDS = {
     "妈妈": ("28-33岁的中国年轻母亲，齐肩黑发低马尾，面庞清秀；服装从头到尾不变："
              "米白色旧棉衣、枣红色旧围裙（胸前一个小口袋）、深蓝碎花背带把熟睡的婴儿背在身后；"
@@ -107,15 +120,27 @@ def post_retry(path, body, key, label, attempts=8, wait0=18):
 
 
 def upload(path):
+    """把垫图传到图床，返回可公开访问的 URL。
+
+    为什么要图床：i2v/i2i 接口只吃 URL，不吃本地文件。
+    ⚠️ 默认图床是**匿名公共**的：含人脸的关键帧会变成公开可访问的 URL。介意就设 MV_UPLOAD_URL。
+    """
+    global _upload_notice_shown
+    if UPLOAD_DISABLED:
+        sys.exit("MV_UPLOAD_DISABLE=1：本轮禁止上传垫图（离线自检模式）。"
+                 "要走真接口请取消该变量，或把 MV_UPLOAD_URL 指向你自己的图床。")
+    if not _upload_notice_shown:
+        _upload_notice_shown = True
+        print(f"垫图图床：{UPLOAD_URL}（匿名公共图床；换自建图床设 MV_UPLOAD_URL）", flush=True)
     for _ in range(3):
         try:
             raw = subprocess.run(
-                ["curl.exe", "-s", "--ssl-no-revoke", "--max-time", "90", "-F",
-                 f"files[]=@{path}", "https://uguu.se/upload"],
+                [CURL, "-s", "--max-time", "90", "-F",
+                 f"{UPLOAD_FIELD}=@{path}", UPLOAD_URL],
                 capture_output=True, text=True, creationflags=NO_WIN).stdout
             url = json.loads(raw)["files"][0]["url"]
-            r = subprocess.run(["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
-                                "--ssl-no-revoke", "--max-time", "30", "-r", "0-0", url],
+            r = subprocess.run([CURL, "-s", "-o", NULL_DEVICE, "-w", "%{http_code}",
+                                "--max-time", "30", "-r", "0-0", url],
                                capture_output=True, text=True,
                                creationflags=NO_WIN).stdout.strip()
             if r in ("200", "206"):
@@ -128,8 +153,8 @@ def upload(path):
 
 def download(url, out, attempts=4):
     for _ in range(attempts):
-        subprocess.run(["curl.exe", "-s", "--ssl-no-revoke", "-L", "--max-time", "240",
-                        "-o", out, url], check=False, creationflags=NO_WIN)
+        subprocess.run([CURL, "-s", "-L", "--max-time", "240", "-o", out, url],
+                       check=False, creationflags=NO_WIN)
         if os.path.exists(out) and os.path.getsize(out) > 10000:
             return True
         time.sleep(10)
@@ -139,7 +164,7 @@ def download(url, out, attempts=4):
 def valid_clip(path):
     if not os.path.exists(path) or os.path.getsize(path) < 10000:
         return False
-    r = subprocess.run([os.path.join(FFMPEG_DIR, "ffprobe.exe"), "-v", "error",
+    r = subprocess.run([FFPROBE, "-v", "error",
                         "-show_entries", "format=duration", "-of", "csv=p=0", path],
                        capture_output=True, text=True, creationflags=NO_WIN)
     return r.returncode == 0 and bool(r.stdout.strip())
@@ -164,8 +189,7 @@ def crop_916(img_path, out_path):
 
 
 def extract_tail(clip, out_png):
-    ff = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
-    subprocess.run([ff, "-y", "-v", "error", "-sseof", "-0.2", "-i", clip,
+    subprocess.run([FFMPEG, "-y", "-v", "error", "-sseof", "-0.2", "-i", clip,
                     "-frames:v", "1", out_png], check=False, creationflags=NO_WIN)
     return os.path.exists(out_png) and os.path.getsize(out_png) > 5000
 
@@ -202,7 +226,8 @@ def poll_one(tid, key, idx, clip_dir, nf):
 def gen_image(prompt, label):
     # 竖版 9:16：必须显式传 size，否则默认方形，两侧构图会被裁掉
     # 默认 2.1；某些细节（例如老人脸上的眼泪）2.1 画不出来时，可用环境变量换更贵的模型再试
-    body = {"model": os.environ.get("KF_MODEL") or KF_MODEL,
+    # KF_MODEL 是历史别名（等价于 MV_KF_MODEL）；MV_KF_MODEL 已在模块加载时读好
+    body = {"model": get("KF_MODEL", KF_MODEL),
             "prompt": prompt, "size": "768x1344"}
     r = post_retry("/v1/images/generations", body, KEY, label, attempts=4, wait0=15)
     if not r:
@@ -299,6 +324,10 @@ def main():
     if bank_ids is not None:
         IDS.clear()
         IDS.update(bank_ids)
+    elif IDS:
+        print("警告：分镜库没有 _meta.ids，本轮将使用**脚本内置的示例角色卡**（%s）——"
+              "那是仓库示例、不是你的角色。请在分镜库 _meta.ids 里给全，"
+              '或显式写 "ids": {} 跳过定妆照阶段。' % "、".join(IDS), flush=True)
     bank_name = os.path.splitext(os.path.basename(args.bank))[0]
     if bank_name.endswith("_shot_bank"):
         bank_name = bank_name[: -len("_shot_bank")]

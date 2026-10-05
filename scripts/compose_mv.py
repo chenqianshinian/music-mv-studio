@@ -11,10 +11,19 @@
    而 `--fresh` 会全片重画（9000 帧约 40–60 分钟）。**不要随便 --fresh。**
 2. **每镜提前 LEAD 秒入场 + 镜界处 DISS 秒真交叉溶解**——按帧号算，可复算、可断点续跑。
 
+v3.1 补强的两件事（都是"静默出错"类的坑）：
+
+3. **片段签名清单** `<WORK>/clips-manifest.json`：记下每个 `shot_<key>.mp4` 的 size+mtime。
+   帧缓存与片段一致时**跳过重复抽帧**（原先每跑一次都把全部片段重抽一遍）；
+   片段变了而帧缓存还是旧的，就打印受影响的镜与帧号区间，`--strict-cache` 则直接退出码 1。
+4. **抽帧失败当场报错**：以前抽帧用 `check=False`，失败后会在后面以
+   `FileNotFoundError: .../0000.jpg` 这种看不懂的方式崩掉。
+
 用法：
     python compose_mv.py                 # 全片
     python compose_mv.py --until 40      # 只合成前 40 秒自检
-    python compose_mv.py --fresh         # 清空帧缓存重画（慎用）
+    python compose_mv.py --fresh         # 清空帧缓存重画（慎用；连片段抽帧一起重来）
+    python compose_mv.py --strict-cache  # 片段比帧缓存新就报错退出（交付前/CI 用）
 
 环境变量：
     ZDN_BANK     分镜库 JSON（必填）
@@ -41,7 +50,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _mvcfg import FFMPEG, FONT_BRUSH, MV_WORK, get  # noqa: E402
+from _mvcfg import FFMPEG, FONT_BRUSH, MV_WORK, font_source, get, resolve_font  # noqa: E402
 
 try:  # 额外图层（行情网格、界面等）是可选件：没有这个模块就跳过，不影响出片
     import ui_layer  # type: ignore
@@ -120,34 +129,36 @@ def vignette_grain(img):
 
 
 _fonts = {}
-_FONT_FALLBACK = ["NotoSansSC-VF.ttf", "msyh.ttc", "arial.ttf", "DejaVuSans.ttf"]
+# 跨平台找一个**真的能画中文**的字体（_mvcfg 里用"两个不同汉字渲染结果是否相同"来证伪，
+# 见 v3.1：macOS 上以前找不到字体 → 中文全变方框，而 qa_captions 会假报"有字幕"）。
+_FONT_PATH = resolve_font(FONT_BRUSH)
+_FONT_SOURCE = font_source()
+_FONT_NOTICE_SHOWN = False
 
 
-def _font_path():
-    if FONT_BRUSH and os.path.isfile(FONT_BRUSH):
-        return FONT_BRUSH
-    roots = [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
-             "/usr/share/fonts", "/usr/local/share/fonts", "/Library/Fonts"]
-    for name in _FONT_FALLBACK:
-        for root in roots:
-            for sub in ("", "truetype", "opentype"):
-                p = os.path.join(root, sub, name)
-                if os.path.isfile(p):
-                    return p
-    return None
-
-
-_FONT_PATH = _font_path()
+def _font_notice():
+    """字幕字体来源只提示一次：正式出片必须用 OFL 等可商用授权字体（§5 #5）。"""
+    global _FONT_NOTICE_SHOWN
+    if _FONT_NOTICE_SHOWN:
+        return
+    _FONT_NOTICE_SHOWN = True
+    if _FONT_SOURCE == "env":
+        print("字幕字体：%s（MV_FONT_BRUSH 指定）" % _FONT_PATH, flush=True)
+    elif _FONT_SOURCE == "auto":
+        print("字幕字体：系统字体 %s —— 自检/预览可用；正式出片请把 MV_FONT_BRUSH 指向"
+              " OFL 等可商用授权的中文字体（字体文件不要随仓库/跨机器分发，§5 #5）"
+              % os.path.basename(_FONT_PATH), flush=True)
+    else:
+        print("警告：没找到任何能画中文的字体，字幕会渲染成缺字方框（豆腐块），"
+              "而 qa_captions 只数亮像素、**会假报「有字幕」**。请设 MV_FONT_BRUSH 指向一个"
+              " OFL 等可商用授权的中文字体，并跑 python scripts/doctor.py 自查。", flush=True)
 
 
 def brush(size):
     if size not in _fonts:
-        if _FONT_PATH:
-            _fonts[size] = ImageFont.truetype(_FONT_PATH, size)
-        else:
-            print("警告：没找到可用字体，字幕将用 PIL 内置位图字体（只适合自检）。"
-                  "请设 MV_FONT_BRUSH 指向一个 OFL 等可商用的行书/黑体字体。", flush=True)
-            _fonts[size] = ImageFont.load_default()
+        _font_notice()
+        _fonts[size] = (ImageFont.truetype(_FONT_PATH, size) if _FONT_PATH
+                        else ImageFont.load_default())
     return _fonts[size]
 
 
@@ -239,7 +250,27 @@ def main():
         print("逐句揭示已启用：%d 条 cue" % len(cue_clauses), flush=True)
     print("shots:", len(SEGS), "| cues:", len(cues), "| until %.2fs" % until, flush=True)
 
+    # ── 逐镜抽帧 + 片段签名清单（v3.1）────────────────────────────────────
+    # 清单记下每个片段的 size+mtime：一致就跳过重复抽帧；不一致就说明"帧缓存是旧的"，
+    # 这正是 §5 #15 的"假完成"来源（片段变了、帧按帧号复用 → 新片段进不了成片）。
+    FRESH = "--fresh" in sys.argv
+    STRICT = "--strict-cache" in sys.argv
+    manifest_path = os.path.join(WORK, "clips-manifest.json")
+    MANIFEST_EXISTED = os.path.exists(manifest_path) and not FRESH
+    manifest = {}
+    if MANIFEST_EXISTED:
+        try:
+            manifest = json.load(open(manifest_path, encoding="utf-8"))
+        except Exception as e:
+            print("警告：片段清单读不动（%s），本轮按「全部重抽」处理" % e, flush=True)
+
+    def _sig(path):
+        st = os.stat(path)
+        return {"size": st.st_size, "mtime": round(st.st_mtime, 3)}
+
     clip_frames = {}
+    stale = []
+    cache_hits = 0
     for t0, t1, key, s, lead in SEGS:
         src = os.path.join(CLIPS_DIR, "shot_%s.mp4" % key)
         # 2 KB 以下基本是空文件或坏下载；上界不设，因为静态镜的正经素材也可能很小
@@ -247,11 +278,51 @@ def main():
             sys.exit("MISSING %s %s" % (key, src))
         outd = os.path.join(WORK, "frames", key)
         os.makedirs(outd, exist_ok=True)
-        subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", src,
-                        "-vf", "scale=%d:%d:force_original_aspect_ratio=decrease,"
-                               "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d" % (W, H, W, H, FPS),
-                        "-q:v", "3", os.path.join(outd, "%04d.jpg")], check=False)
-        clip_frames[key] = (outd, len([x for x in os.listdir(outd) if x.endswith(".jpg")]))
+        sig = _sig(src)
+        ent = manifest.get(key) or {}
+        have = len([x for x in os.listdir(outd) if x.endswith(".jpg")])
+        if (not FRESH and have > 0 and ent.get("size") == sig["size"]
+                and ent.get("mtime") == sig["mtime"]):
+            clip_frames[key] = (outd, have)          # 命中：不重抽
+            cache_hits += 1
+            continue
+        if have and MANIFEST_EXISTED:
+            stale.append((key, t0, t1))
+        for x in os.listdir(outd):                   # 片段变了：必须清掉这一镜的旧帧
+            if x.endswith(".jpg"):
+                os.remove(os.path.join(outd, x))
+        r = subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", src,
+                            "-vf", "scale=%d:%d:force_original_aspect_ratio=decrease,"
+                                   "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d" % (W, H, W, H, FPS),
+                            "-q:v", "3", os.path.join(outd, "%04d.jpg")],
+                           capture_output=True, text=True)
+        n = len([x for x in os.listdir(outd) if x.endswith(".jpg")])
+        if r.returncode != 0 or n == 0:
+            # 以前这里是 check=False：失败后会在 load_frame 里以 FileNotFoundError 崩掉
+            err = ((r.stderr or "").strip().splitlines() or [""])[-1]
+            sys.exit("抽帧失败：%s（ffmpeg 退出码 %s，抽出 %d 张）\n  %s"
+                     % (src, r.returncode, n, err))
+        manifest[key] = dict(sig, frames=n, file=os.path.basename(src))
+        clip_frames[key] = (outd, n)
+    json.dump(manifest, open(manifest_path, "w", encoding="utf-8"), indent=1, sort_keys=True)
+    print("片段：%d 个命中帧缓存，%d 个重抽（清单 %s）"
+          % (cache_hits, len(clip_frames) - cache_hits,
+             "已更新" if cache_hits != len(clip_frames) else "命中"), flush=True)
+
+    if stale:
+        lines = []
+        for key, t0, t1 in stale:
+            # 受影响的帧号区间：镜头区间 ± 提前入场 ± 交叉溶解（保守取全包）
+            f0 = max(0, int((t0 - LEAD - DISS) * FPS))
+            f1 = min(int(until * FPS), int((t1 + DISS) * FPS))
+            lines.append("  · %s  %.2f–%.2fs  →  帧 %05d..%05d" % (key, t0, t1, f0, f1 - 1))
+        print("\n警告：%d 个片段的素材变了，但帧缓存里还留着旧帧（§5 #15「假完成」）：\n%s\n"
+              "  修法：把上面这些帧号从 %s 里**移走**（不要删，可回退）再原样重跑；\n"
+              "        或者整片重画：python compose_mv.py --fresh\n"
+              % (len(stale), "\n".join(lines), os.path.join(WORK, "out")),
+              flush=True)
+        if STRICT:
+            sys.exit("--strict-cache：片段比帧缓存新，拒绝出一版可能过期的成片。")
 
     def seg_at(t):
         for seg in SEGS:
@@ -296,7 +367,8 @@ def main():
         if f % 600 == 0:
             print("frame %d/%d" % (f, int(until * FPS)), flush=True)
 
-    cmd = [FFMPEG, "-y", "-framerate", str(FPS), "-i", os.path.join(out_dir, "%05d.jpg")]
+    cmd = [FFMPEG, "-hide_banner", "-y", "-framerate", str(FPS),
+           "-i", os.path.join(out_dir, "%05d.jpg")]
     if AUDIO and os.path.exists(AUDIO):
         cmd += ["-i", AUDIO, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k"]
     cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",

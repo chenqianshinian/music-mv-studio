@@ -30,8 +30,9 @@ import subprocess
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _mvcfg import NO_WIN  # noqa: E402
 
-NO_WIN = 0x08000000
 issues = []
 
 ROOT = os.environ.get("MV_PROJECT")
@@ -92,10 +93,13 @@ PROC_KEYWORDS = (("生成器", "gen_zuindongni"), ("合成", "compose_"),
 
 
 def procs():
+    """返回 [(标签, pid)]；**取不到进程列表时返回 None**（不要静默当成"没有进程在跑"——
+    那正好会伪造出"生成器已崩"或"一切正常"的假结论，而这两个结论正是本脚本要防的）。"""
     if os.name == "nt":
+        # portability-scan-allow: 这一段只在 os.name == "nt" 分支里执行
         cmd = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='ffmpeg.exe'\" | "
                "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress")
-        argv = ["powershell", "-NoProfile", "-Command", cmd]
+        argv = ["powershell", "-NoProfile", "-Command", cmd]  # portability-scan-allow: 仅 Windows 分支
     else:
         argv = ["ps", "-eo", "pid,args"]
     try:
@@ -105,7 +109,7 @@ def procs():
         if isinstance(data, dict):
             data = [data]
     except Exception:
-        return []
+        return None
     out = []
     if isinstance(data, list) and data and isinstance(data[0], dict):
         for p in data:
@@ -166,13 +170,21 @@ def main():
     mk = sorted(os.listdir(STATE)) if os.path.isdir(STATE) else []
     print("marker：%s" % (", ".join(mk) if mk else "无"))
     pl = procs()
-    print("进程：%s" % (", ".join("%s#%s" % t for t in pl) if pl else "（无）"))
-    names = [t for t, _ in pl]
+    PROC_UNKNOWN = pl is None
+    if PROC_UNKNOWN:
+        # 2026-10-05：macOS/Linux 上曾因 creationflags 抛错被 except 吞掉 → 永远显示"（无）"，
+        # 于是"生成器还在跑"被误报成"已停/崩"。现在取不到就明说，不让它冒充结论。
+        print("进程：（**取不到进程列表**：进程查询命令不可用或被杀，进程类结论不可信）")
+        issues.append("取不到进程列表 → 进程类判定（是否已停/疑似卡住）本轮不可信；"
+                       "只看计数、新鲜度与一致性")
+    else:
+        print("进程：%s" % (", ".join("%s#%s" % t for t in pl) if pl else "（无）"))
+    names = [t for t, _ in (pl or [])]
     has_gen = "生成器" in names
     has_driver = "驱动" in names
     has_compose = "合成" in names
 
-    if TOTAL and clip_n < TOTAL and not has_gen:
+    if TOTAL and clip_n < TOTAL and not has_gen and not PROC_UNKNOWN:
         issues.append("片段未齐（%d/%d）但没有生成器进程 → 已停/崩，需重启断点续跑" % (clip_n, TOTAL))
     if TOTAL and 0 < clip_n < TOTAL and has_gen and a_clip is not None and a_clip > 45:
         issues.append("片段停在 %d/%d、最新片段已 %.0f 分钟没动，但生成器进程还在 → 疑似卡住"

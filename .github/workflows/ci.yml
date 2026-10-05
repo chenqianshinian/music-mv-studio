@@ -6,7 +6,7 @@ on:
 
 jobs:
   hygiene:
-    name: 发布门禁（密钥 / 个人路径 / 语法）
+    name: 发布门禁（密钥 / 路径 / 跨平台 / 语法）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,8 +15,42 @@ jobs:
           python-version: "3.11"
       - name: 扫明文密钥与个人绝对路径
         run: python tools/hygiene_scan.py
+      - name: 扫只在 Windows 上能跑的写法
+        run: python tools/portability_scan.py
       - name: Python 语法检查
-        run: python -m compileall -q scripts tools examples
+        run: python -m compileall -q scripts tools examples tests
+
+  smoke:
+    # 这一 job 是 v3.1 加的重点：**在非 Windows 上真跑一遍离线管线**。
+    # v3.0 在 Windows 上全绿，但同一份代码在 macOS/Linux 上有 7 个脚本直接崩
+    # （Windows 专有的 creationflags / curl.exe / NUL / 找不到 CJK 字体）——
+    # compileall 与静态扫描都抓不到这类问题，只有真跑一遍才行。
+    name: 离线管线冒烟（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 装依赖（Python）
+        run: python -m pip install --upgrade pip numpy Pillow
+      - name: 装 ffmpeg 与中文字体（Linux）
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - name: 装 ffmpeg（macOS）
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: 装 ffmpeg（Windows）
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: 环境自检
+        run: python scripts/doctor.py
+      - name: 离线端到端冒烟测试（零成本、不需要密钥）
+        run: python tests/smoke_offline.py
 
   markdown:
     name: Markdown 检查

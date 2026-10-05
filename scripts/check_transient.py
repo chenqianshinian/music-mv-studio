@@ -21,9 +21,8 @@ from PIL import Image
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _mvcfg import FFMPEG  # noqa: E402
+from _mvcfg import FFMPEG, NO_WIN
 
-NO_WIN = 0x08000000
 
 
 def analyze(clip, lo, hi, fps, sc, crop_dir=None, topn=3):
