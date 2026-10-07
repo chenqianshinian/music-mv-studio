@@ -1,4 +1,4 @@
 interface:
   display_name: "音乐 MV 制作工作流"
-  short_description: "把一首歌做成竖版 MV：导演设计 → 首帧闸门 → 逐镜生成 → 像素级质检 → 定点返修，附 41 条血泪清单"
+  short_description: "把一首歌做成竖版 MV：导演设计 → 首帧闸门 → 逐镜生成 → 像素级质检 → 定点返修，附 66 条血泪清单"
   default_prompt: "用 music-mv-studio 工作流，为这首歌做一支 MV"
