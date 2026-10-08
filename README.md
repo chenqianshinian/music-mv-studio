@@ -5,7 +5,7 @@
 ![CI](https://github.com/chenqianshinian/music-mv-studio/actions/workflows/ci.yml/badge.svg)
 
 **一个「音乐视频（MV）制作」的 Agent Skill**：把「一首歌 + 一份歌词」做成竖版音乐 MV 的可复用工作流——
-导演方法 + 一条跑过多首长片（每首约 100 镜）的生成管线 + 66 条真实踩过的坑。
+导演方法 + 一条跑过多首长片（每首约 100 镜）的生成管线 + 73 条真实踩过的坑。
 
 > 入口是 **[SKILL.md](SKILL.md)**：支持 Agent Skills 的工具（Codex 等）把它放进 skills 目录即可加载；
 > 不装进 Agent 也能照做——它就是一份可执行的制作纪律 + 一组能独立运行的 Python 脚本。
@@ -117,7 +117,7 @@ python scripts/gen_zuindongni.py --bank <你的分镜库.json> --outdir <中间�
 
 ```
 .
-├── SKILL.md                 # ★ 方法论与纪律（§5 = 66 条血泪清单）
+├── SKILL.md                 # ★ 方法论与纪律（§5 = 73 条血泪清单）
 ├── README.md
 ├── CHANGELOG.md             # 每一版改了什么、为什么
 ├── CONTRIBUTING.md
@@ -245,7 +245,7 @@ It is a *methodology plus a production pipeline*, not a black box:
 5. **Repair surgically** — the composer caches frames by frame index, so a fix re-renders tens of frames
    instead of the whole film (SKILL §3, §9).
 
-The most valuable file is [SKILL.md](SKILL.md) §5: **45 lessons actually paid for in production**.
+The most valuable file is [SKILL.md](SKILL.md) §5: **73 lessons actually paid for in production**.
 Try it for free first: `python examples/make_demo_assets.py demo` needs no API key.
 
 A zero-cost offline smoke test (`tests/smoke_offline.py`) runs the same pipeline on Linux, macOS and
